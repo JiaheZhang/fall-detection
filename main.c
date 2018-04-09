@@ -20,6 +20,7 @@
 #include "exti.h"
 #include "ov7725.h"
 #include "sram.h" 
+#include "math.h"
 
 
 #define  OV7725 1
@@ -61,6 +62,7 @@ u16 Ex;//均值
 u16 Ey;
 float cov[2][2];//协方差矩阵
 float eigenvalue;//只需计算最大的特征值
+float vector[2];//特征向量
 
 /***********以下是储存在片外RAM的变量***************/
 u8 pixel_back[240][320][3] __attribute__((at(0X680ff000)));//储存背景图片的所有像素点
@@ -73,6 +75,7 @@ u8 my_abs(int a )
 {
 	return a>0 ? a : -a;
 }
+
 
 /*************/
 
@@ -330,6 +333,15 @@ void image_process()
 		}
 		cov[0][1] = sum_pix / (N - 1);
 		cov[1][0] = cov[0][1];
+		
+		/**********最大的特征值***求根公式*******/
+		eigenvalue = (cov[0][0] + cov[1][1] + 
+		sqrt((cov[0][0] + cov[1][1]) * (cov[0][0] + cov[1][1])
+		- 4 * (cov[0][0] * cov[1][1] - cov[0][1] * cov[1][0]))) / 2;
+		
+		/*****特征向量****/
+		vector[0] = cov[0][1];
+		vector[1] = eigenvalue - cov[0][0];
 		
 	}
 	
