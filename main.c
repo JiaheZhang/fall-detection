@@ -117,10 +117,10 @@ int16_t my_arctan(float value)
 			value = -value;
 		}
 			
-    result = get_value(left,right,value);
-		
-		if(value < 0.009)  result = 0;//边界值
+    if(value < 0.009)  result = 0;//边界值
     if(value > 115)  result = 90;
+    
+    result = get_value(left,right,value);
 		if(flag)
 			return -result;
 		else
@@ -394,10 +394,6 @@ void image_process()
 			feature_angle = my_abs(angle);
 		
 	}
-	else
-		feature_angle = 0;
-	
-	LCD_ShowxNum(200,200,feature_angle,3,16,0);
 	
 	if(feature_aspectRatio >= 1.5)
 		BEEP = 1;
