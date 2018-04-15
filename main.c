@@ -20,7 +20,6 @@
 #include "exti.h"
 #include "ov7725.h"
 #include "sram.h" 
-#include "math.h"
 
 
 #define  OV7725 1
@@ -51,8 +50,7 @@ u8 temp_r,temp_g,temp_b;//RGB的临时变量
 u8 temp_gray;
 u16 color;
 u8 flag_reflash = 0;
-float aspectRatio = 0;//宽高比
-float inclination = 0;//倾斜角度
+float feature_aspectRatio = 0;//宽高比----第一个特征
 u8 isFall = 0;//是否摔倒
 u8 isPerson = 0;//是否有人
 
@@ -61,9 +59,21 @@ u32 sum_pix;//计算和的临时变量
 u16 Ex;//均值
 u16 Ey;
 float cov[2][2];//协方差矩阵
-float eigenvalue;//只需计算最大的特征值
-float vector[2];//特征向量
+float tanTable[90] = {0.009,0.026,0.044,0.061,0.079,0.096,0.114,
+0.132,0.149,0.167,0.185,0.203,0.222,0.240,0.259,0.277,0.296,0.315,
+0.335,0.354,0.374,0.394,0.414,0.435,0.456,0.477,0.499,0.521,0.543,
+0.566,0.589,0.613,0.637,0.662,0.687,0.713,0.740,0.767,0.795,0.824,
+0.854,0.885,0.916,0.949,0.983,1.018,1.054,1.091,1.130,1.171,1.213,
+1.257,1.303,1.351,1.402,1.455,1.511,1.570,1.632,1.698,1.767,1.842,
+1.921,2.006,2.097,2.194,2.300,2.414,2.539,2.675,2.824,2.989,3.172,
+3.376,3.606,3.867,4.165,4.511,4.915,5.396,5.976,6.691,7.596,8.777,
+10.385,12.706,16.350,22.904,38.188,114.589};
+//用于my_tan()中查表计算arctan
 
+int16_t angle = 0;//中间变量
+u8 feature_angle = 0;//倾斜角度-----第二个特征
+	
+	
 /***********以下是储存在片外RAM的变量***************/
 u8 pixel_back[240][320][3] __attribute__((at(0X680ff000)));//储存背景图片的所有像素点
 u8 pixel[240][320][3]  __attribute__((at(0X68137400)));
@@ -76,9 +86,47 @@ u8 my_abs(int a )
 	return a>0 ? a : -a;
 }
 
-
-/*************/
-
+/*********************/
+u8 get_value(u8 left,u8 right,float value)
+{
+    u8 half = (left + right) >> 1;
+    if(left == half && half + 1 == right)  return right;
+    if(left + 1 == half && half + 1 == right)
+    {
+        if(value < tanTable[half]) return half;
+        else  return right;
+    }
+    if(value <= tanTable[half])
+    {
+        return get_value(left,half,value);
+    }
+    else
+    {
+        return get_value(half,right,value);
+    }
+}
+//使用二分法查找
+int16_t my_arctan(float value)
+{
+	  u8 flag = 0;
+	  int16_t result = 0;
+	  u8 left = 0,right = 89;
+	  if(value <= 0)
+		{
+			flag = 1;
+			value = -value;
+		}
+			
+    if(value < 0.009)  result = 0;//边界值
+    if(value > 115)  result = 90;
+    
+    result = get_value(left,right,value);
+		if(flag)
+			return -result;
+		else
+			return result;
+} 
+/*************************/
 
 //更新LCD显示(OV7725)
 void OV7725_camera_refresh(void)
@@ -272,10 +320,10 @@ void image_process()
 	/***宽高比***/
 	if(isPerson == 1)
 	{
-		aspectRatio = (x2 - x1) / (y2 - y1);
+		feature_aspectRatio = (x2 - x1) / (y2 - y1);
 	}
 	else
-		aspectRatio = 0;
+		feature_aspectRatio = 0;
 	
 	/***********协方差算姿态角***********/
 	if(isPerson == 1)
@@ -334,18 +382,20 @@ void image_process()
 		cov[0][1] = sum_pix / (N - 1);
 		cov[1][0] = cov[0][1];
 		
-		/**********最大的特征值***求根公式*******/
-		eigenvalue = (cov[0][0] + cov[1][1] + 
-		sqrt((cov[0][0] + cov[1][1]) * (cov[0][0] + cov[1][1])
-		- 4 * (cov[0][0] * cov[1][1] - cov[0][1] * cov[1][0]))) / 2;
+		//计算角度
+		angle = (my_arctan(2 * cov[1][0] / (cov[0][0] - cov[1][1]))) >> 1;
+		if(cov[0][0] < cov[1][1])
+			angle += 90;
 		
-		/*****特征向量****/
-		vector[0] = cov[0][1];
-		vector[1] = eigenvalue - cov[0][0];
+		//归一化成特征
+		if(cov[0][1] < 0)
+			feature_angle = 180 - angle;
+		else
+			feature_angle = my_abs(angle);
 		
 	}
 	
-	if(aspectRatio >= 1.5)
+	if(feature_aspectRatio >= 1.5)
 		BEEP = 1;
 	else
 		BEEP = 0;
