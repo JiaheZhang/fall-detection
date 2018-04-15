@@ -50,8 +50,7 @@ u8 temp_r,temp_g,temp_b;//RGB的临时变量
 u8 temp_gray;
 u16 color;
 u8 flag_reflash = 0;
-float aspectRatio = 0;//宽高比
-float inclination = 0;//倾斜角度
+float feature_aspectRatio = 0;//宽高比----第一个特征
 u8 isFall = 0;//是否摔倒
 u8 isPerson = 0;//是否有人
 
@@ -70,7 +69,9 @@ float tanTable[90] = {0.009,0.026,0.044,0.061,0.079,0.096,0.114,
 3.376,3.606,3.867,4.165,4.511,4.915,5.396,5.976,6.691,7.596,8.777,
 10.385,12.706,16.350,22.904,38.188,114.589};
 //用于my_tan()中查表计算arctan
-	
+
+int16_t angle = 0;//中间变量
+u8 feature_angle = 0;//倾斜角度-----第二个特征
 	
 	
 /***********以下是储存在片外RAM的变量***************/
@@ -105,12 +106,25 @@ u8 get_value(u8 left,u8 right,float value)
     }
 }
 //使用二分法查找
-u8 my_arctan(float value)
+int16_t my_arctan(float value)
 {
-    if(value < 0.009)  return 0;//边界值
-    if(value > 115)  return 90;
-    int left = 0,right = 89;
-    return get_value(left,right,value);
+	  u8 flag = 0;
+	  int16_t result = 0;
+	  u8 left = 0,right = 89;
+	  if(value <= 0)
+		{
+			flag = 1;
+			value = -value;
+		}
+			
+    if(value < 0.009)  result = 0;//边界值
+    if(value > 115)  result = 90;
+    
+    result = get_value(left,right,value);
+		if(flag)
+			return -result;
+		else
+			return result;
 } 
 /*************************/
 
@@ -306,10 +320,10 @@ void image_process()
 	/***宽高比***/
 	if(isPerson == 1)
 	{
-		aspectRatio = (x2 - x1) / (y2 - y1);
+		feature_aspectRatio = (x2 - x1) / (y2 - y1);
 	}
 	else
-		aspectRatio = 0;
+		feature_aspectRatio = 0;
 	
 	/***********协方差算姿态角***********/
 	if(isPerson == 1)
@@ -368,9 +382,20 @@ void image_process()
 		cov[0][1] = sum_pix / (N - 1);
 		cov[1][0] = cov[0][1];
 		
+		//计算角度
+		angle = (my_arctan(2 * cov[1][0] / (cov[0][0] - cov[1][1]))) >> 1;
+		if(cov[0][0] < cov[1][1])
+			angle += 90;
+		
+		//归一化成特征
+		if(cov[0][1] < 0)
+			feature_angle = 180 - angle;
+		else
+			feature_angle = my_abs(angle);
+		
 	}
 	
-	if(aspectRatio >= 1.5)
+	if(feature_aspectRatio >= 1.5)
 		BEEP = 1;
 	else
 		BEEP = 0;
