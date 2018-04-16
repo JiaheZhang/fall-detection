@@ -55,9 +55,9 @@ u8 isFall = 0;//是否摔倒
 u8 isPerson = 0;//是否有人
 
 u32 N = 0;//图像的和(N)
-u32 sum_pix;//计算和的临时变量
-u16 Ex;//均值
-u16 Ey;
+int sum_pix;//计算和的临时变量
+int Ex;//均值
+int Ey;
 float cov[2][2];//协方差矩阵
 float tanTable[90] = {0.009,0.026,0.044,0.061,0.079,0.096,0.114,
 0.132,0.149,0.167,0.185,0.203,0.222,0.240,0.259,0.277,0.296,0.315,
@@ -72,7 +72,8 @@ float tanTable[90] = {0.009,0.026,0.044,0.061,0.079,0.096,0.114,
 
 int16_t angle = 0;//中间变量
 u8 feature_angle = 0;//倾斜角度-----第二个特征
-	
+
+u32 test[4];
 	
 /***********以下是储存在片外RAM的变量***************/
 u8 pixel_back[240][320][3] __attribute__((at(0X680ff000)));//储存背景图片的所有像素点
@@ -81,7 +82,11 @@ u8 pixel_gray[240][320] __attribute__((at(0X6816f800)));//灰度图片
 //u32 testsram[250000] __attribute__((at(0X68100000)));//测试用数组
 
 
-u8 my_abs(int a )
+u32 my_abs(int a )
+{
+	return a>0 ? a : -a;
+}
+float my_abs_f(float a )
 {
 	return a>0 ? a : -a;
 }
@@ -111,21 +116,25 @@ int16_t my_arctan(float value)
 	  u8 flag = 0;
 	  int16_t result = 0;
 	  u8 left = 0,right = 89;
+	
+	
+	  if(value < - 115.000) {BEEP = 1;return -90;}
+	  else if(value > - 0.009 && value < 0.009) return 0;
+	  else if(value > 115.000) return 90;
+	
 	  if(value <= 0)
 		{
 			flag = 1;
-			value = -value;
+			value = 0.000 - value;
 		}
 			
-    if(value < 0.009)  result = 0;//边界值
-    if(value > 115)  result = 90;
-    
     result = get_value(left,right,value);
+		
 		if(flag)
 			return -result;
 		else
 			return result;
-} 
+}
 /*************************/
 
 //更新LCD显示(OV7725)
@@ -158,7 +167,7 @@ void OV7725_camera_refresh(void)
 				pixel[i][j][0] = ((color&0xf800)>>11);
 				pixel[i][j][1] = ((color&0x07e0)>>5);
 				pixel[i][j][2] = ((color&0x001f));
-				if(pixel_gray[i][j] == 1)
+				if(pixel_gray[i][j])
 				{
 					color = 0xffff;
 				}
@@ -185,7 +194,7 @@ void OV7725_camera_refresh(void)
 ********************************************/
 void image_process()
 {
-	u16 i,j;
+	int i,j;
 	//int16_t intj;
 	/*****初始化*********/
 	N = 0;
@@ -236,7 +245,7 @@ void image_process()
 				temp_r = my_abs(pixel_back[i][j][0] - pixel[i][j][0]);
 				temp_g = my_abs(pixel_back[i][j][1] - pixel[i][j][1]);
 				temp_b = my_abs(pixel_back[i][j][2] - pixel[i][j][2]); 
-				temp_gray = (temp_r + (temp_g >> 1) + temp_b);
+				temp_gray = (temp_r + temp_g + temp_b);
 				if(temp_gray >= 18)//灰度二值化
 				{
 					pixel_gray[i][j] = 1;
@@ -334,16 +343,17 @@ void image_process()
 		}
 		
 		/***********计算均值 Ex Ey******/
+		sum_pix = 0;
 		for(i = x1;i <= x2;i++)
 		{
-			sum_pix += pix_x[i] * (i - x1);
+			sum_pix += (pix_x[i] * (i - x1));
 		}
 		Ex = x1 + sum_pix / N;
 		
 		sum_pix = 0;
 		for(i = y1;i <= y2;i++)
 		{
-			sum_pix += pix_y[i] * (i - y1);
+			sum_pix += (pix_y[i] * (i - y1));
 		}
 		Ey = y1 + sum_pix / N;
 		
@@ -357,14 +367,14 @@ void image_process()
 		sum_pix = 0;
 		for(i = x1;i <= x2;i++)
 		{
-			sum_pix += (Ex - i) * (Ex - i) * pix_x[i];
+			sum_pix += ((Ex - i) * (Ex - i) * pix_x[i]);
 		}
 		cov[0][0] = sum_pix / (N - 1);
 		
 		sum_pix = 0;
 		for(i = y1;i <= y2;i++)
 		{
-			sum_pix += (Ey - i) * (Ey - i) * pix_y[i];
+			sum_pix += ((Ey - i) * (Ey - i) * pix_y[i]);
 		}
 		cov[1][1] = sum_pix / (N - 1);
 		
@@ -373,27 +383,53 @@ void image_process()
 		{
 			for(j = y1;j <= y2;j++)
 			{
-				if(pixel_gray[i][j] != 0 )
+				if(pixel_gray[i][j])
 				{
-					sum_pix += (Ex - i) * (Ey - j);
+					sum_pix += ((Ex - i) * (Ey - j));
 				}
 			}
 		}
-		cov[0][1] = sum_pix / (N - 1);
-		cov[1][0] = cov[0][1];
+		if(sum_pix < 0)
+		{
+			cov[0][1] = my_abs(sum_pix) / (N - 1);
+			cov[0][1] = 0 - cov[0][1];
+		}
+		else
+			cov[0][1] = my_abs(sum_pix) / (N - 1);
 		
+		cov[1][0] = cov[0][1];
+			
 		//计算角度
-		angle = (my_arctan(2 * cov[1][0] / (cov[0][0] - cov[1][1]))) >> 1;
-		if(cov[0][0] < cov[1][1])
-			angle += 90;
+		angle = 0.5 * (my_arctan(2.00 * cov[1][0] / (cov[0][0] - cov[1][1])));
 		
 		//归一化成特征
-		if(cov[0][1] < 0)
-			feature_angle = 180 - angle;
+		if(cov[0][0] < cov[1][1])
+		{
+			if(cov[0][1] < 0)
+			{
+			  feature_angle = 90 - angle;
+			}
+			else
+			{
+				feature_angle = 90 + angle;
+			}
+		}
 		else
-			feature_angle = my_abs(angle);
-		
+		{
+			if(cov[0][1] < 0)
+			{
+				feature_angle = my_abs(angle);
+			}
+			else
+			{
+				feature_angle = my_abs(angle);
+			}
+		}
 	}
+	else
+		feature_angle = 0;
+	
+	LCD_ShowxNum(100,60,feature_angle,2,16,0);
 	
 	if(feature_aspectRatio >= 1.5)
 		BEEP = 1;
@@ -439,7 +475,7 @@ int main(void)
 	{
 		if(OV7725_Init()==0)
 		{
-			LCD_ShowString(30,190,200,16,16,"OV7725 Init OK       ");
+			LCD_ShowString(30,190,200,16,16,"OV7725 Init OK");
 			while(1)
 			{
 				key=KEY_Scan(0);
@@ -473,6 +509,7 @@ int main(void)
 	TIM6_Int_Init(10000,7199);			//10Khz计数频率,1秒钟中断									  
 	EXTI8_Init();						//使能外部中断8,捕获帧中断			
 	LCD_Clear(BLACK);
+	LCD_ShowString(50,60,200,16,16,"Angle: ");
  	while(1)
 	{	
 		OV7725_camera_refresh();//更新显示
