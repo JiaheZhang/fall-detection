@@ -6,7 +6,7 @@
 #include "key.h"     
 #include "usmart.h" 
 #include "malloc.h"
-#include "sdio_sdcard.h"  
+//#include "sdio_sdcard.h"  
 #include "w25qxx.h"    
 #include "ff.h"  
 #include "exfuns.h"   
@@ -14,12 +14,13 @@
 #include "piclib.h"	
 #include "string.h"		
 #include "math.h"	 
-#include "ov7670.h"
+//#include "ov7670.h"
 #include "beep.h" 
 #include "timer.h" 
 #include "exti.h"
 #include "ov7725.h"
 #include "sram.h" 
+#include "MMC_SD.h"
 
 
 #define  OV7725 1
@@ -27,6 +28,7 @@
 #define key_down PEin(3)
 #define key_left PEin(2)
 #define key_up PAin(0)
+#define key_right PEin(4)
 
 extern u8 ov_sta;	//在exit.c里面定义
 extern u8 ov_frame;	//在timer.c里面定义
@@ -73,7 +75,8 @@ float tanTable[90] = {0.009,0.026,0.044,0.061,0.079,0.096,0.114,
 int16_t angle = 0;//中间变量
 u8 feature_angle = 0;//倾斜角度-----第二个特征
 
-u32 test[4];
+u8 mode = 0;
+
 	
 /***********以下是储存在片外RAM的变量***************/
 u8 pixel_back[240][320][3] __attribute__((at(0X680ff000)));//储存背景图片的所有像素点
@@ -81,6 +84,31 @@ u8 pixel[240][320][3]  __attribute__((at(0X68137400)));
 u8 pixel_gray[240][320] __attribute__((at(0X6816f800)));//灰度图片
 //u32 testsram[250000] __attribute__((at(0X68100000)));//测试用数组
 
+
+void menu_display()
+{
+	LCD_ShowString(30,190,200,16,16,"Choose Mode");
+	LCD_ShowString(30,210,200,16,16,"Mode 0 Start");
+	LCD_ShowString(30,230,200,16,16,"Mode 1 SD Save");
+	LCD_ShowString(30,250,200,16,16,"Mode 2 Display Camera");
+	while(1)
+	{
+		if(key_down == 0)
+		{
+			LCD_ShowString(10,210 + mode * 20,20,16,16," ");
+			delay_ms(200);
+			if(mode == 2)  mode = 0;
+			else  mode++;
+		}
+		LCD_ShowString(10,210 + mode * 20,20,16,16,">");
+		if(key_right == 0)
+		{
+			delay_ms(200);
+			LCD_Clear(WHITE);
+			break;
+		}
+	}
+}
 
 u32 my_abs(int a )
 {
@@ -180,6 +208,43 @@ void OV7725_camera_refresh(void)
 					color = 0xf800;
 				if(i == x2 && j >= y1 && j <= y2)
 					color = 0xf800;
+				LCD->LCD_RAM=color;
+			}
+		}
+		ov_sta=0;					//清零帧中断标记
+		ov_frame++; 
+		LCD_Scan_Dir(DFT_SCAN_DIR);	//恢复默认扫描方向 
+			
+	}
+}
+
+//更新LCD显示(OV7725)
+void OV7725_camera_refresh_2(void)
+{
+	u16 i,j;
+	
+	if(ov_sta)//有帧中断更新
+	{
+		LCD_Scan_Dir(U2D_L2R);//从上到下,从左到右
+		LCD_Set_Window((lcddev.width-320)/2,(lcddev.height-240)/2,320,240);//将显示区域设置到屏幕中央 480*320
+		LCD_WriteRAM_Prepare();     //开始写入GRAM	
+		OV7725_RRST=0;				//开始复位读指针 
+		OV7725_RCK_L;
+		OV7725_RCK_H;
+		OV7725_RCK_L;
+		OV7725_RRST=1;				//复位读指针结束 
+		OV7725_RCK_H; 
+		for(i=0;i<240;i++)
+		{
+			for(j=0;j<320;j++)
+			{
+				OV7725_RCK_L;
+				color=GPIOC->IDR&0XFF;	//读数据
+				OV7725_RCK_H;
+				color<<=8;
+				OV7725_RCK_L;
+				color|=GPIOC->IDR&0XFF;	//读数据
+				OV7725_RCK_H;
 				LCD->LCD_RAM=color;
 			}
 		}
@@ -450,49 +515,81 @@ void image_process()
 	
 }
 
+/**************验收程序******************/
+void start_mode()
+{
+	LCD_ShowString(50,60,200,16,16,"Angle: ");
+ 	while(1)
+	{	
+		OV7725_camera_refresh();//更新显示
+		image_process();
+		if(key_down == 0)
+		{
+			flag_reflash = 1;
+			count = 0;
+		}
+	}
+}
 
-
+/*****************sd卡模式*********************/
+void SD_Save_mode()
+{
+	u32 sd_size;
+	while(SD_Initialize())//检测不到SD卡
+	{
+		LCD_ShowString(60,150,200,16,16,"SD Card Error!");
+		delay_ms(500);					
+		LCD_ShowString(60,150,200,16,16,"Please Check! ");
+		delay_ms(500);
+		LED0=!LED0;//DS0闪烁
+	}
+ 	POINT_COLOR=BLUE;//设置字体为蓝色 
+	//检测SD卡成功 											    
+	LCD_ShowString(60,150,200,16,16,"SD Card OK    ");
+	LCD_ShowString(60,170,200,16,16,"SD Card Size:     MB");
+	sd_size=SD_GetSectorCount();//得到扇区数
+	LCD_ShowNum(164,170,sd_size>>11,5,16);//显示SD卡容量
+	delay_ms(20000);
+	while(1)
+	{	
+		OV7725_camera_refresh_2();//更新显示
+	}
+}
+/******************只显示摄像头图像*********************/
+void Display_mode()
+{
+	while(1)
+	{	
+		OV7725_camera_refresh_2();//更新显示
+	}
+}
+/******************/
 int main(void)
-{	 
-	u8 key;		 
- 	u8 i=0;	     
- 
+{
+	
 	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);//设置中断优先级分组为组2：2位抢占优先级，2位响应优先级
 	delay_init();	    	 //延时函数初始化	  
   FSMC_SRAM_Init();		//初始化外部SRAM  
-	uart_init(115200);	 	//串口初始化为115200
+	uart_init(9600);	 	//串口初始化为115200
  	usmart_dev.init(72);		//初始化USMART		
  	LED_Init();		  			//初始化与LED连接的硬件接口
 	KEY_Init();					//初始化按键
 	LCD_Init();			   		//初始化LCD  
 	BEEP_Init();        		//蜂鸣器初始化	 
 	W25QXX_Init();				//初始化W25Q128
- 	my_mem_init(SRAMIN);		//初始化内部内存池
-	exfuns_init();				//为fatfs相关变量申请内存  
-	POINT_COLOR=RED;      
-											  
-	while(1)//初始化OV7725_OV7670
+ 	//my_mem_init(SRAMIN);		//初始化内部内存池
+	//exfuns_init();				//为fatfs相关变量申请内存  
+	POINT_COLOR=RED;
+	/********菜单显示程序******/
+	menu_display();
+	/**********初始化OV7725_OV7670*****************/
+	while(1)
 	{
 		if(OV7725_Init()==0)
 		{
 			LCD_ShowString(30,190,200,16,16,"OV7725 Init OK");
-			while(1)
-			{
-				key=KEY_Scan(0);
-				if(key==KEY0_PRES)
-				{
-					OV7725_Window_Set(320,240,0);//QVGA模式输出
-					break;
-				}
-				i++;
-				LCD_ShowString(30,206,200,16,16,"press KEY0"); //闪烁显示提示信息
-				if(i==200)
-				{	
-					LCD_Fill(30,206,200,250+16,WHITE);
-					i=0; 
-				}
-				delay_ms(5);
-			}				
+			delay_ms(200);
+			OV7725_Window_Set(320,240,0);//QVGA模式输出
 			OV7725_CS=0;
 			break;
 		}
@@ -505,20 +602,18 @@ int main(void)
 		}
 	}
 	
-	/***************************************/
+	
 	TIM6_Int_Init(10000,7199);			//10Khz计数频率,1秒钟中断									  
 	EXTI8_Init();						//使能外部中断8,捕获帧中断			
 	LCD_Clear(BLACK);
-	LCD_ShowString(50,60,200,16,16,"Angle: ");
- 	while(1)
-	{	
-		OV7725_camera_refresh();//更新显示
-		image_process();
-		if(key_down == 0)
-		{
-			flag_reflash = 1;
-			count = 0;
-		}
-	}	   										    
+	/**************菜单选择后进入主程序*************************/
+	switch(mode)
+	{
+		case 0: start_mode(); break;
+		case 1: SD_Save_mode(); break;
+		case 2: Display_mode(); break;
+		default: break;
+	}
+	
 }
 
