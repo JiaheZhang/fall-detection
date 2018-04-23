@@ -78,6 +78,7 @@ u8 feature_angle = 0;//倾斜角度-----第二个特征
 u32 sd_size;
 u32 cnt = 0;
 u8 mode = 0;
+u8 sd_send_temp[512];
 
 	
 /***********以下是储存在片外RAM的变量***************/
@@ -93,13 +94,14 @@ void menu_display()
 	LCD_ShowString(30,210,200,16,16,(u8*)"Mode 0 Start");
 	LCD_ShowString(30,230,200,16,16,(u8*)"Mode 1 SD Save");
 	LCD_ShowString(30,250,200,16,16,(u8*)"Mode 2 Display Camera");
+	LCD_ShowString(30,270,200,16,16,(u8*)"Mode 3 SD Send");
 	while(1)
 	{
 		if(key_down == 0)
 		{
 			LCD_ShowString(10,210 + mode * 20,20,16,16,(u8*)" ");
 			delay_ms(200);
-			if(mode == 2)  mode = 0;
+			if(mode == 3)  mode = 0;
 			else  mode++;
 		}
 		LCD_ShowString(10,210 + mode * 20,20,16,16,(u8*)">");
@@ -252,6 +254,7 @@ void OV7725_camera_refresh_2(void)
 				sd_pixel[i][j][1] = sd_color;
 			}
 		}
+		//这里可以优化 可以512字节写一块 防止先去外部ram储存的时间浪费
 		SD_WriteDisk_(sd_pixel[0][0],cnt,150);
 		cnt += 150;
 		SD_WriteDisk_(sd_pixel[0][0],cnt,150);
@@ -597,6 +600,33 @@ void SD_Save_mode()
 		OV7725_camera_refresh_2();//更新显示并存储数据
 	}
 }
+/*********************SD卡发送***********************/
+void SD_Send_mode()
+{
+	u16 i = 0;
+	while(SD_Initialize())//检测不到SD卡
+	{
+		LCD_ShowString(60,150,200,16,16,(u8*)"SD Card Error!");
+		delay_ms(500);					
+		LCD_ShowString(60,150,200,16,16,(u8*)"Please Check! ");
+		delay_ms(500);
+		LED0=!LED0;//DS0闪烁
+	}
+ 	POINT_COLOR=BLUE;//设置字体为蓝色
+	LCD_ShowString(60,150,200,16,16,(u8*)"SD Card OK");
+	LCD_ShowString(60,170,200,16,16,(u8*)"SD Sending...");
+	while(1)
+	{
+		SD_ReadDisk_(sd_send_temp,cnt,1);
+		for(i = 0;i < 512;i++)
+		{
+			USART_SendData(USART1, sd_send_temp[i]);
+		}
+		cnt++;
+		LCD_ShowNum(60,190,cnt,5,16);//显示SD卡容量
+	}
+	
+}
 /******************只显示摄像头图像*********************/
 void Display_mode()
 {
@@ -611,7 +641,9 @@ int main(void)
 	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);//设置中断优先级分组为组2：2位抢占优先级，2位响应优先级
 	delay_init();	    	 //延时函数初始化	  
   FSMC_SRAM_Init();		//初始化外部SRAM  
-	uart_init(9600);	 	//串口初始化为115200
+	//USART1_TX   GPIOA.9
+	//USART1_RX	  GPIOA.10
+	uart_init(9600);	 	//串口初始化为9600
  	usmart_dev.init(72);		//初始化USMART		
  	LED_Init();		  			//初始化与LED连接的硬件接口
 	KEY_Init();					//初始化按键
@@ -653,6 +685,7 @@ int main(void)
 		case 0: start_mode(); break;
 		case 1: SD_Save_mode(); break;
 		case 2: Display_mode(); break;
+		case 3: SD_Send_mode(); break;
 		default: break;
 	}
 	
