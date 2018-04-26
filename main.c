@@ -61,7 +61,7 @@ int sum_pix;//计算和的临时变量
 int Ex;//均值
 int Ey;
 float cov[2][2];//协方差矩阵
-float tanTable[90] = {0.009,0.026,0.044,0.061,0.079,0.096,0.114,
+const float tanTable[90] = {0.009,0.026,0.044,0.061,0.079,0.096,0.114,
 0.132,0.149,0.167,0.185,0.203,0.222,0.240,0.259,0.277,0.296,0.315,
 0.335,0.354,0.374,0.394,0.414,0.435,0.456,0.477,0.499,0.521,0.543,
 0.566,0.589,0.613,0.637,0.662,0.687,0.713,0.740,0.767,0.795,0.824,
@@ -79,13 +79,14 @@ u32 sd_size;
 u32 cnt = 0;
 u8 mode = 0;
 u8 sd_send_temp[512];
+const u8 frame_flag[6] = {0xff,0x00,0xff,0x00,0xff,0x00};//用于同步帧
 
 	
 /***********以下是储存在片外RAM的变量***************/
 u8 pixel_back[240][320][3] __attribute__((at(0X680ff000)));//储存背景图片的所有像素点
 u8 pixel[240][320][3]  __attribute__((at(0X68137400)));
 u8 pixel_gray[240][320] __attribute__((at(0X6816f800)));//灰度图片
-u8 sd_pixel[240][320][2] __attribute__((at(0X68182400)));//灰度图片
+u8 sd_pixel[153600] __attribute__((at(0X68182400)));//灰度图片
 //u32 testsram[250000] __attribute__((at(0X68100000)));//测试用数组
 
 void menu_display()
@@ -94,14 +95,15 @@ void menu_display()
 	LCD_ShowString(30,210,200,16,16,(u8*)"Mode 0 Start");
 	LCD_ShowString(30,230,200,16,16,(u8*)"Mode 1 SD Save");
 	LCD_ShowString(30,250,200,16,16,(u8*)"Mode 2 Display Camera");
-	LCD_ShowString(30,270,200,16,16,(u8*)"Mode 3 SD Send");
+	LCD_ShowString(30,270,200,16,16,(u8*)"Mode 3 SD Send Pic");
+	LCD_ShowString(30,290,200,16,16,(u8*)"Mode 4 SD Send fct");
 	while(1)
 	{
 		if(key_down == 0)
 		{
 			LCD_ShowString(10,210 + mode * 20,20,16,16,(u8*)" ");
 			delay_ms(200);
-			if(mode == 3)  mode = 0;
+			if(mode == 4)  mode = 0;
 			else  mode++;
 		}
 		LCD_ShowString(10,210 + mode * 20,20,16,16,(u8*)">");
@@ -224,7 +226,8 @@ void OV7725_camera_refresh(void)
 //更新LCD显示(OV7725)
 void OV7725_camera_refresh_2(void)
 {
-	u16 i,j;
+	u32 i;
+	u32 j = 0;
 	if(ov_sta)//有帧中断更新
 	{
 		LCD_Scan_Dir(U2D_L2R);//从上到下,从左到右
@@ -236,13 +239,11 @@ void OV7725_camera_refresh_2(void)
 		OV7725_RCK_L;
 		OV7725_RRST=1;				//复位读指针结束 
 		OV7725_RCK_H; 
-		for(i=0;i<240;i++)
+		for(i=0;i<76800;i++)
 		{
-			for(j=0;j<320;j++)
-			{
 				OV7725_RCK_L;
 				color=GPIOC->IDR&0XFF;	//读数据
-				sd_pixel[i][j][0] = color;
+				sd_pixel[j] = color;
 				OV7725_RCK_H;
 				color<<=8;
 				OV7725_RCK_L;
@@ -251,14 +252,11 @@ void OV7725_camera_refresh_2(void)
 				
 				OV7725_RCK_H;
 				LCD->LCD_RAM=color;
-				sd_pixel[i][j][1] = sd_color;
-			}
+				sd_pixel[j + 1] = sd_color;
+			  j += 2;
 		}
 		//这里可以优化 可以512字节写一块 防止先去外部ram储存的时间浪费
-		SD_WriteDisk_(sd_pixel[0][0],cnt,150);
-		cnt += 150;
-		SD_WriteDisk_(sd_pixel[0][0],cnt,150);
-		cnt += 150;
+		SD_WriteDisk_(sd_pixel,cnt,300);
 		ov_sta=0;					//清零帧中断标记
 		LCD_Scan_Dir(DFT_SCAN_DIR);	//恢复默认扫描方向 
 	}
@@ -541,6 +539,11 @@ void image_process()
 	
 	LCD_ShowxNum(100,60,feature_angle,2,16,0);
 	
+	sd_send_temp[0] = x2 - x1;
+	sd_send_temp[1] = y2 - y1;
+	sd_send_temp[2] = feature_angle;
+	SD_WriteDisk_(sd_send_temp,cnt,1);
+	cnt++;
 	if(feature_aspectRatio >= 1.5)
 		BEEP = 1;
 	else
@@ -563,6 +566,14 @@ void image_process()
 /**************验收程序******************/
 void start_mode()
 {
+	while(SD_Initialize())//检测不到SD卡
+	{
+		LCD_ShowString(60,150,200,16,16,(u8*)"SD Card Error!");
+		delay_ms(500);					
+		LCD_ShowString(60,150,200,16,16,(u8*)"Please Check! ");
+		delay_ms(500);
+		LED0=!LED0;//DS0闪烁
+	}
 	LCD_ShowString(50,60,200,16,16,(u8*)"Angle: ");
  	while(1)
 	{	
@@ -601,7 +612,7 @@ void SD_Save_mode()
 	}
 }
 /*********************SD卡发送***********************/
-void SD_Send_mode()
+void SD_Send_PIC_mode()
 {
 	u16 i = 0;
 	while(SD_Initialize())//检测不到SD卡
@@ -618,14 +629,58 @@ void SD_Send_mode()
 	while(1)
 	{
 		SD_ReadDisk_(sd_send_temp,cnt,1);
+		if(cnt % 300 == 0)//发送帧的开始信号 用于同步
+		{
+			for(i = 0;i < 6;i++)
+			{
+				USART_SendData(USART1, frame_flag[i]);
+				delay_us(75);
+			}
+		}
 		for(i = 0;i < 512;i++)
 		{
 			USART_SendData(USART1, sd_send_temp[i]);
+			delay_ms(1);
 		}
+		LCD_ShowNum(60,190,cnt,5,16);//显示发送SD的扇区号
+		
+		delay_ms(10);
 		cnt++;
-		LCD_ShowNum(60,190,cnt,5,16);//显示SD卡容量
+		
 	}
-	
+}
+void SD_Send_feature_mode()
+{
+	while(SD_Initialize())//检测不到SD卡
+	{
+		LCD_ShowString(60,150,200,16,16,(u8*)"SD Card Error!");
+		delay_ms(500);					
+		LCD_ShowString(60,150,200,16,16,(u8*)"Please Check! ");
+		delay_ms(500);
+		LED0=!LED0;//DS0闪烁
+	}
+ 	POINT_COLOR=BLUE;//设置字体为蓝色
+	LCD_ShowString(60,150,200,16,16,(u8*)"SD Card OK");
+	LCD_ShowString(60,170,200,16,16,(u8*)"SD Sending...");
+	while(1)
+	{
+		SD_ReadDisk_(sd_send_temp,cnt,1);
+		LCD_ShowNum(60,190,cnt,5,16);//显示发送SD的扇区号
+		
+		LCD_ShowNum(60,210,sd_send_temp[0],5,16);
+		USART_SendData(USART1,sd_send_temp[0]);
+		delay_ms(10);
+		
+		LCD_ShowNum(60,230,sd_send_temp[1],5,16);
+		USART_SendData(USART1,sd_send_temp[1]);
+		delay_ms(10);
+		
+		LCD_ShowNum(60,250,sd_send_temp[2],5,16);
+		USART_SendData(USART1,sd_send_temp[2]);
+		
+		cnt++;
+		delay_ms(50);
+	}
 }
 /******************只显示摄像头图像*********************/
 void Display_mode()
@@ -643,7 +698,7 @@ int main(void)
   FSMC_SRAM_Init();		//初始化外部SRAM  
 	//USART1_TX   GPIOA.9
 	//USART1_RX	  GPIOA.10
-	uart_init(9600);	 	//串口初始化为9600
+	uart_init(9600);	 	//串口初始化为115200
  	usmart_dev.init(72);		//初始化USMART		
  	LED_Init();		  			//初始化与LED连接的硬件接口
 	KEY_Init();					//初始化按键
@@ -685,7 +740,8 @@ int main(void)
 		case 0: start_mode(); break;
 		case 1: SD_Save_mode(); break;
 		case 2: Display_mode(); break;
-		case 3: SD_Send_mode(); break;
+		case 3: SD_Send_PIC_mode(); break;
+		case 4: SD_Send_feature_mode(); break;
 		default: break;
 	}
 	
