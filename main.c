@@ -380,7 +380,7 @@ void image_process()
 	}
 	for(i = 239;i > 0;i--)
 	{
-		if(pix_x[i] >= 20 && pix_x[i - 1] >= 20)
+		if(pix_x[i] >= 12 && pix_x[i - 1] >= 10)
 		{
 			x2 = i;
 			break;
@@ -391,7 +391,7 @@ void image_process()
 	
 	for(i = 0;i < 319;i++)
 	{
-		if(pix_y[i] >= 15 && pix_y[i + 1] >= 15)
+		if(pix_y[i] >= 12 && pix_y[i + 1] >= 10)
 		{
 			y1 = i;
 			break;
@@ -538,6 +538,7 @@ void image_process()
 		feature_angle = 0;
 	
 	LCD_ShowxNum(100,60,feature_angle,2,16,0);
+	LCD_ShowxNum(150,60,cnt,3,16,0);
 	
 	sd_send_temp[0] = x2 - x1;
 	sd_send_temp[1] = y2 - y1;
@@ -634,7 +635,7 @@ void SD_Send_PIC_mode()
 			for(i = 0;i < 6;i++)
 			{
 				USART_SendData(USART1, frame_flag[i]);
-				delay_us(75);
+				delay_ms(1);
 			}
 		}
 		for(i = 0;i < 512;i++)
@@ -643,6 +644,7 @@ void SD_Send_PIC_mode()
 			delay_ms(1);
 		}
 		LCD_ShowNum(60,190,cnt,5,16);//显示发送SD的扇区号
+		LCD_ShowNum(60,210,sd_send_temp[0],5,16);
 		
 		delay_ms(10);
 		cnt++;

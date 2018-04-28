@@ -20,7 +20,7 @@ data = np.zeros(240*320*3, dtype='int8')
 data = data.reshape(320, 240, 3)
 i, j = 0, 0
 
-ser = serial.Serial("com3", baudrate=115200)
+ser = serial.Serial("com3", baudrate=9600)
 cnt = -1
 is_save = False
 fir_or_sec = True
