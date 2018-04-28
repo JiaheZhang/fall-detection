@@ -1,5 +1,5 @@
-f = open('a.txt', 'r')
-f_data = open('data.txt', 'w+')
+f = open('2018-04-28,16.20.56.txt', 'r')
+f_data = open('2018-04-28,16.20.56_data.txt', 'w+')
 
 
 def data_transfer(str_of_three):
