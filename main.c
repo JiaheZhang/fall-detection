@@ -21,6 +21,8 @@
 #include "ov7725.h"
 #include "sram.h" 
 #include "MMC_SD.h"
+#include "usart3.h"
+#include "common.h" 
 
 
 #define  OV7725 1
@@ -80,6 +82,7 @@ u32 cnt = 0;
 u8 mode = 0;
 u8 sd_send_temp[512];
 const u8 frame_flag[6] = {0xff,0x00,0xff,0x00,0xff,0x00};//用于同步帧
+u8 isESP = 0;
 
 	
 /***********以下是储存在片外RAM的变量***************/
@@ -97,13 +100,14 @@ void menu_display()
 	LCD_ShowString(30,250,200,16,16,(u8*)"Mode 2 Display Camera");
 	LCD_ShowString(30,270,200,16,16,(u8*)"Mode 3 SD Send Pic");
 	LCD_ShowString(30,290,200,16,16,(u8*)"Mode 4 SD Send fct");
+	LCD_ShowString(30,310,200,16,16,(u8*)"Mode 5 WIFI");
 	while(1)
 	{
 		if(key_down == 0)
 		{
 			LCD_ShowString(10,210 + mode * 20,20,16,16,(u8*)" ");
 			delay_ms(200);
-			if(mode == 4)  mode = 0;
+			if(mode == 5)  mode = 0;
 			else  mode++;
 		}
 		LCD_ShowString(10,210 + mode * 20,20,16,16,(u8*)">");
@@ -369,7 +373,7 @@ void image_process()
 	for(i = 0;i < 239;i++)
 	{
 		
-		if(pix_x[i] >= 20 && pix_x[i + 1] >= 20)
+		if(pix_x[i] >= 5 && pix_x[i + 1] >= 5)
 		{
 			x1 = i;
 			break;
@@ -380,7 +384,7 @@ void image_process()
 	}
 	for(i = 239;i > 0;i--)
 	{
-		if(pix_x[i] >= 12 && pix_x[i - 1] >= 10)
+		if(pix_x[i] >= 5 && pix_x[i - 1] >= 5)
 		{
 			x2 = i;
 			break;
@@ -391,7 +395,7 @@ void image_process()
 	
 	for(i = 0;i < 319;i++)
 	{
-		if(pix_y[i] >= 12 && pix_y[i + 1] >= 10)
+		if(pix_y[i] >= 5 && pix_y[i + 1] >= 5)
 		{
 			y1 = i;
 			break;
@@ -402,7 +406,7 @@ void image_process()
 	for(i = 319;i > 0;i--)
 	{
 		
-		if(pix_y[i] >= 15 && pix_y[i - 1] >= 15)
+		if(pix_y[i] >= 5 && pix_y[i - 1] >= 5)
 		{
 			y2 = i;
 			break;
@@ -692,6 +696,23 @@ void Display_mode()
 		OV7725_camera_refresh_3();//更新显示
 	}
 }
+/**************无线模式**************/
+void Wifi_Send()
+{
+	while(atk_8266_send_cmd("AT","OK",20))//检查WIFI模块是否在线
+	{
+		atk_8266_quit_trans();//退出透传
+		atk_8266_send_cmd("AT+CIPMODE=0","OK",200);  //关闭透传模式	
+		LCD_ShowString(30,200,200,16,16,(u8*)"NO Module. Please Check");
+	}
+	while(atk_8266_send_cmd("ATE0","OK",20));//关闭回显
+	LCD_Clear(WHITE);
+	LCD_ShowString(30,200,200,16,16,(u8*)"Find Wifi Module       ");
+	while(1)
+	{
+		
+	}
+}
 /******************/
 int main(void)
 {
@@ -700,7 +721,8 @@ int main(void)
   FSMC_SRAM_Init();		//初始化外部SRAM  
 	//USART1_TX   GPIOA.9
 	//USART1_RX	  GPIOA.10
-	uart_init(9600);	 	//串口初始化为115200
+	uart_init(9600);	 	//串口初始化为9600
+	usart3_init(115200);		//初始化串口3 
  	usmart_dev.init(72);		//初始化USMART		
  	LED_Init();		  			//初始化与LED连接的硬件接口
 	KEY_Init();					//初始化按键
@@ -744,6 +766,7 @@ int main(void)
 		case 2: Display_mode(); break;
 		case 3: SD_Send_PIC_mode(); break;
 		case 4: SD_Send_feature_mode(); break;
+		case 5: Wifi_Send(); break;
 		default: break;
 	}
 	
