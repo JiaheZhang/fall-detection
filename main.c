@@ -696,22 +696,103 @@ void Display_mode()
 		OV7725_camera_refresh_3();//更新显示
 	}
 }
-/**************无线模式**************/
-void Wifi_Send()
+void my_wifi_STA()
 {
-	while(atk_8266_send_cmd("AT","OK",20))//检查WIFI模块是否在线
-	{
-		atk_8266_quit_trans();//退出透传
-		atk_8266_send_cmd("AT+CIPMODE=0","OK",200);  //关闭透传模式	
-		LCD_ShowString(30,200,200,16,16,(u8*)"NO Module. Please Check");
-	}
-	while(atk_8266_send_cmd("ATE0","OK",20));//关闭回显
-	LCD_Clear(WHITE);
-	LCD_ShowString(30,200,200,16,16,(u8*)"Find Wifi Module       ");
+	u8 *p;
+	u8 ipbuf[16]; 	//IP缓存
+	u16 rlen=0;
+	u8 constate=0;	//连接状态
+	cnt = 990;
+	p=mymalloc(SRAMIN,32);							//申请32字节内存
+			
+	atk_8266_send_cmd((u8*)"AT+CWMODE=1",(u8*)"OK",50);		//设置WIFI STA模式
+	atk_8266_send_cmd((u8*)"AT+RST",(u8*)"OK",20);		//DHCP服务器关闭(仅AP模式有效) 
+	delay_ms(1000);         //延时3S等待重启成功
+	delay_ms(1000);
+	delay_ms(1000);
+	delay_ms(1000);
+	LCD_ShowString(30,140,200,16,16,(u8*)"Configure Wifi...");
+	
+	//设置连接到的WIFI网络名称/加密方式/密码,这几个参数需要根据您自己的路由器设置进行修改!! 
+	sprintf((char*)p,"AT+CWJAP=\"%s\",\"%s\"",wifista_ssid,wifista_password);//设置无线参数:ssid,密码
+	
+	
+	while(atk_8266_send_cmd(p,(u8*)"WIFI GOT IP",300));					//连接目标路由器,并且获得IP
+	atk_8266_netpro_sel(50,30,(u8*)"Waiting...");	//选择网络模式
+	
+	atk_8266_send_cmd((u8*)"AT+CIPMUX=1",(u8*)"OK",20);   //0：单连接，1：多连接
+	sprintf((char*)p,(char*)"AT+CIPSERVER=1,%s",(u8*)portnum);    //开启Server模式(0，关闭；1，打开)，端口号为portnum
+	atk_8266_send_cmd(p,(u8*)"OK",50);
+	atk_8266_at_response(1);
+	
+	LCD_ShowString(30,140,200,16,16,(u8*)"Wifi is connecting");
+	atk_8266_get_wanip(ipbuf);//服务器模式,获取WAN IP
+	sprintf((char*)p,"IP:%s Port:%s",ipbuf,(u8*)portnum);
+	LCD_ShowString(30,160,250,16,16,p);//显示IP地址和端口	
+	
+	LCD_ShowString(30,180,200,16,16,(u8*)"State:");//连接状态
+	LCD_ShowString(120,180,200,16,16,(u8*)"Mode:");//连接状态
+	LCD_ShowString(30,200,200,16,16,(u8*)"Send Data:");//发送数据
+	LCD_ShowString(30,220,200,16,16,(u8*)"Recv Data:");//接收数据
+	atk_8266_wificonf_show(30,10,(u8*)"Router Configure:",(u8*)wifista_ssid,(u8*)wifista_encryption,(u8*)wifista_password);
+	POINT_COLOR=BLUE;
+	LCD_ShowString(120+50,180,200,16,16,(u8*)"TCP server"); 		//连接状态
+	USART3_RX_STA=0;
 	while(1)
 	{
-		
+		if(key_right == 0)
+		{
+			sprintf((char*)p,"Attention! Someone falls!");//测试数据
+			LCD_ShowString(30+85,200,200,16,16,p);
+			atk_8266_send_cmd((u8*)"AT+CIPSEND=0,25",(u8*)"OK",200);  //发送指定长度的数据
+			delay_ms(200);
+			atk_8266_send_data(p,(u8*)"OK",100);  //发送指定长度的数据
+		}
+		delay_ms(10);
+		if(USART3_RX_STA&0X8000)		//接收到一次数据了
+		{ 
+			rlen=USART3_RX_STA&0X7FFF;	//得到本次接收到的数据长度
+			USART3_RX_BUF[rlen]=0;		//添加结束符 
+			printf("%s",USART3_RX_BUF);	//发送到串口   
+			sprintf((char*)p,"Receive %d Bytes",rlen);//接收到的字节数 
+			LCD_ShowString(30,240,156,16,16,p); 			//显示接收到的数据长度
+			//LCD_ShowString(30,260,180,16,16,USART3_RX_BUF);//显示接收到的数据  
+			LCD_Fill(30,270,300,500,WHITE);
+			LCD_Fill(110,200,320,220,WHITE);
+			Show_Str(30,270,180,190,USART3_RX_BUF,12,0);//显示接收到的数据
+			USART3_RX_STA=0;
+			if(constate!='+')cnt=1000;		//状态为还未连接,立即更新连接状态
+			else cnt=0;                   //状态为已经连接了,10秒后再检查
+		}  
+		if(cnt==1000)//连续10秒钟没有收到任何数据,检查连接是不是还存在.
+		{
+			constate=atk_8266_consta_check();//得到连接状态
+			if(constate=='+')LCD_ShowString(30+50,180,200,16,16,(u8*)"succ");  //连接状态
+			else LCD_ShowString(30+50,180,200,16,16,(u8*)"fail"); 	 
+			cnt=0;
+		}
+		if((cnt%20)==0)LED0=!LED0;
+		atk_8266_at_response(1);
+		cnt++;
 	}
+}
+
+/**************无线模式**************/
+void Wifi_Send()
+
+{
+	while(atk_8266_send_cmd((u8*)"AT",(u8*)"OK",20))//检查WIFI模块是否在线
+	{
+		atk_8266_quit_trans();//退出透传
+		atk_8266_send_cmd((u8*)"AT+CIPMODE=0",(u8*)"OK",200);  //关闭透传模式	
+		LCD_ShowString(30,100,200,16,16,(u8*)"NO Module. Please Check");
+	}
+	while(atk_8266_send_cmd((u8*)"ATE0",(u8*)"OK",20));//关闭回显
+	LCD_Clear(WHITE);
+	LCD_ShowString(30,100,200,16,16,(u8*)"Find Wifi Module       ");
+	LCD_ShowString(30,120,200,16,16,(u8*)"STA Mode");
+	delay_ms(10); 
+	my_wifi_STA();
 }
 /******************/
 int main(void)
